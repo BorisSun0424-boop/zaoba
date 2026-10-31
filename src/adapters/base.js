@@ -1,4 +1,4 @@
-import { gotoSettled, pageText, clickByKeywords, detectLogin, dismissOverlays, classifyOutcome } from '../dom.js';
+import { gotoSettled, pageText, clickByKeywords, findClickables, detectLogin, dismissOverlays, classifyOutcome } from '../dom.js';
 import { sleep } from '../util.js';
 
 /**
@@ -61,11 +61,22 @@ export async function genericCheckin(adapter, page, ctx, logger, cfg = {}) {
     }
 
     // 已完成判定（幂等保护）
+    // 注意：不能只凭文案判定——页面上常有属于别的活动的同款文案
+    // （例如豆包工作的「已领取」属于"选择工作领域领奖励"，而每日签到按钮其实还在）。
+    // 真正可信的信号是「签到入口按钮已经消失」。
     const doneHit = adapter.doneKeywords.find((k) => text.includes(k));
     const cls = classifyOutcome(text);
     if (doneHit || cls.already) {
-      logger.ok(`今天已完成（页面显示"${doneHit || '已签到/已领取'}"）`);
-      return { status: 'already', detail: doneHit || '页面显示今日已完成', url: page.url() };
+      const entryLeft = (adapter.keywords || ['签到']).length
+        ? await findClickables(page, adapter.keywords || ['签到'])
+        : [];
+      if (entryLeft.length === 0) {
+        logger.ok(`今天已完成（页面显示"${doneHit || '已签到/已领取'}"且签到入口已消失）`);
+        return { status: 'already', detail: doneHit || '页面显示今日已完成', url: page.url() };
+      }
+      logger?.step?.(
+        `页面出现了「${doneHit || '已完成'}」但签到入口仍在，判定为今天还没签，继续`,
+      );
     }
 
     // 平台自定义逻辑优先

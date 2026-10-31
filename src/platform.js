@@ -112,7 +112,15 @@ export async function isProcessRunning(execPath) {
   }
   try {
     const { stdout } = await exec('pgrep', ['-f', execPath], { timeout: 8000 });
-    return stdout.trim().length > 0;
+    if (stdout.trim()) return true;
+    // 有些客户端（豆包/豆包工作这类原生 launcher）启动后主进程会自己退出，
+    // 只留 helper / 内核进程在后台继续跑。只按主进程路径查会漏判成「没在运行」，
+    // 后果是退出清理不生效 → 单实例锁残留 → 下次启动拿不到调试端口。
+    // 所以再按整个 bundle 目录兜底查一次。
+    const bundle = String(execPath).match(/^(.+\.app)\/Contents\//)?.[1];
+    if (!bundle) return false;
+    const r2 = await exec('pgrep', ['-f', `${bundle}/Contents`], { timeout: 8000 });
+    return r2.stdout.trim().length > 0;
   } catch {
     return false;
   }

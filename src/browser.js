@@ -73,7 +73,7 @@ export async function launchContext(cfg, { headless, logger } = {}) {
   if (channel) opts.channel = channel;
   else if (wantHeadless) opts.channel = 'chromium';
 
-  if (logger) logger.info(`启动浏览器 headless=${wantHeadless} channel=${opts.channel || 'chromium-headless-shell'} profile=${userDataDir}`);
+  if (logger) logger.info(`启动浏览器 headless=${wantHeadless} channel=${opts.channel || (wantHeadless ? 'chromium-headless-shell' : 'bundled-chromium')} profile=${userDataDir}`);
 
   let ctx;
   try {

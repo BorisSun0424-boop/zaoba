@@ -20,7 +20,7 @@
   },
   "platforms": {
     "doubao-client": {
-      "enabled": true,
+      "enabled": false,
       "type": "client",
       "name": "豆包",
       "app": "/Applications/Doubao.app",
@@ -29,6 +29,8 @@
       ],
       "port": 9445,
       "cdpMode": "arg",
+      "autoRestart": true,
+      "launchTimeoutMs": 120000,
       "pageUrlMatch": "doubao-chat",
       "keywords": [
         "签到",
@@ -41,7 +43,7 @@
         "已签到",
         "明天再来"
       ],
-      "notes": "2026-10 实测：客户端可被 CDP 接管，但当前版本未发现稳定签到入口（活动弹窗为远程投放）"
+      "notes": "2026-11 复核：当前版本主进程不透传 --remote-debugging-port（无法开调试端口），且网页端无签到入口。历史 0 成功，故默认关闭。若客户端改版支持 CDP 且出现稳定签到入口，再改 enabled=true 重试。注意：豆包的「签到领额度」在【豆包工作】(doubaowork-client) 里，不在本客户端。"
     },
     "trae-cn": {
       "enabled": true,
@@ -121,6 +123,8 @@
       ],
       "port": 9444,
       "cdpMode": "arg",
+      "autoRestart": true,
+      "launchTimeoutMs": 120000,
       "openUrl": "https://www.doubao.com/pc/agent-explore",
       "keywords": [
         "立即签到"

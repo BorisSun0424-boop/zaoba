@@ -22,9 +22,19 @@ const APP_SECRET = '8a1317a7468aa3ad86e997d08f3f31cb';
 const API_CHECKIN = '/chatglm/member-api/member/daily_login_score';
 const API_MEMBER = '/chatglm/member-api/member/member_info';
 
-/** 生成智谱要求的签名头。时间戳倒数第二位的校验位由业务侧算，这里直接按官方实现传毫秒串 */
+/**
+ * 生成智谱要求的签名头。
+ *
+ * 注意两点（2026-10-31 实测踩坑）：
+ *  1) 时间戳不是原样的毫秒串。官方 j() 会把 13 位时间戳的**倒数第二位**替换成校验位：
+ *       校验位 = (各位数字之和 − 倒数第二位) % 10
+ *     再拿改写后的串参与 md5，所以这里的 ts 必须做同样处理。
+ *  2) 光有签名头还不够，接口还要求 `Authorization: Bearer <chatglm_token>`。
+ *     缺这个头时服务端统一返回 400 40003 bad request(40003)，
+ *     看起来像"未登录"，实际是"缺请求头"——排查时极易误判。
+ */
 export function buildZhipuHeaders(deviceId, { appVersion = '2.0.7' } = {}) {
-  const ts = String(Date.now());
+  const ts = signedTimestamp();
   const nonce = randomBytes(16).toString('hex');
   const sign = createHash('md5').update(`${ts}-${nonce}-${APP_SECRET}`).digest('hex');
   return {
@@ -37,6 +47,14 @@ export function buildZhipuHeaders(deviceId, { appVersion = '2.0.7' } = {}) {
     'X-Nonce': nonce,
     'X-Sign': sign,
   };
+}
+
+/** 复刻官方 j()：13 位毫秒串，倒数第二位替换为「各位和(不含该位) % 10」 */
+function signedTimestamp() {
+  const raw = String(Date.now());
+  const digits = raw.split('').map(Number);
+  const sum = digits.reduce((a, b) => a + b, 0) - digits[digits.length - 2];
+  return raw.slice(0, raw.length - 2) + (sum % 10) + raw.slice(-1);
 }
 
 export default defineAdapter({
@@ -64,13 +82,20 @@ export default defineAdapter({
     const headers = buildZhipuHeaders(deviceId);
 
     // 3) 在页面上下文里发请求：cookie、origin、UA 全部天然正确，不需要手工拼 Cookie 头
+    //    但 Authorization 必须手工加：官方的 chatglm_token 同时以 Bearer 形式发给业务接口，
+    //    只带 cookie 会被判 40003（错误信息说"未登录"，其实是缺头）
     const res = await page.evaluate(
       async ({ headers, apiCheckin, apiMember }) => {
+        const m = document.cookie.match(/(?:^|;\s*)chatglm_token=([^;]+)/);
+        const token = m ? m[1] : '';
+        if (!token) return { noToken: true };
+
+        const withAuth = { ...headers, Authorization: `Bearer ${token}` };
         const call = async (url, method = 'POST') => {
           try {
             const r = await fetch(url, {
               method,
-              headers,
+              headers: withAuth,
               body: method === 'POST' ? '{}' : undefined,
               credentials: 'include',
             });
@@ -93,6 +118,10 @@ export default defineAdapter({
       },
       { headers, apiCheckin: API_CHECKIN, apiMember: API_MEMBER },
     );
+
+    if (res.noToken) {
+      return { status: 'needs_login', detail: '页面里没有 chatglm_token，请点卡片上的「去登录」重新扫码' };
+    }
 
     const ck = res.checkin || {};
     const body = ck.json || {};

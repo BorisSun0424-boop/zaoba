@@ -92,6 +92,29 @@ export async function runClientApp(pc, { logger, cfg, shotDir, shotName, dryRun 
   let launchedPid = null;
   const wasRunningAtStart = await asynIsRunning(execPath);
 
+  // 拉起客户端所需的环境与参数（后面的重启重试也要用，所以在 if 外面准备好）
+  const launchEnv = { ...process.env };
+  delete launchEnv.ELECTRON_RUN_AS_NODE; // Electron 客户端会因此以 Node 模式启动并秒退
+  delete launchEnv.NODE_OPTIONS;
+  const launchArgs = [];
+  if ((pc.cdpMode || 'arg') === 'env') {
+    launchEnv[pc.cdpEnv || 'WORKBUDDY_REMOTE_DEBUGGING_PORT'] = String(port);
+  } else {
+    launchArgs.push(`--remote-debugging-port=${port}`);
+  }
+  const launchOnce = async () => {
+    const child = spawn(execPath, launchArgs, { detached: true, stdio: 'ignore', env: launchEnv });
+    child.unref();
+    launchedPid = child.pid;
+    const t0 = Date.now();
+    while (Date.now() - t0 < timeoutMs) {
+      const v = await cdpVersion(port);
+      if (v) return v;
+      await sleep(1200);
+    }
+    return null;
+  };
+
   if (!version) {
     if (wasRunningAtStart) {
       if (!pc.autoRestart) {
@@ -105,28 +128,19 @@ export async function runClientApp(pc, { logger, cfg, shotDir, shotName, dryRun 
       await gracefulQuitApp(pc, execPath, logger);
     }
 
-    const env = { ...process.env };
-    delete env.ELECTRON_RUN_AS_NODE; // Electron 客户端会因此以 Node 模式启动并秒退
-    delete env.NODE_OPTIONS;
-
-    const args = [];
-    if ((pc.cdpMode || 'arg') === 'env') {
-      env[pc.cdpEnv || 'WORKBUDDY_REMOTE_DEBUGGING_PORT'] = String(port);
-    } else {
-      args.push(`--remote-debugging-port=${port}`);
-    }
-
     logger?.info(`启动 ${pc.name || '客户端'}（端口 ${port}）`);
-    const child = spawn(execPath, args, { detached: true, stdio: 'ignore', env });
-    child.unref();
-    launchedPid = child.pid;
+    version = await launchOnce();
 
-    const t0 = Date.now();
-    while (Date.now() - t0 < timeoutMs) {
-      version = await cdpVersion(port);
-      if (version) break;
-      await sleep(1200);
+    // Electron 客户端有单实例锁：上一个实例还没退干净时，新进程会把参数转发给旧实例
+    // 然后自己退出，调试端口永远开不起来。这种情况再强制重启一次基本都能成功。
+    if (!version && (await asynIsRunning(execPath))) {
+      logger?.warn(`端口未就绪但 ${pc.name || '客户端'} 进程仍在，可能是单实例锁，强制退出后重试一次`);
+      await gracefulQuitApp(pc, execPath, logger);
+      await sleep(1500);
+      logger?.info(`重试启动 ${pc.name || '客户端'}（端口 ${port}）`);
+      version = await launchOnce();
     }
+
     if (!version) {
       await quitApp(launchedPid, execPath, logger);
       return { status: 'error', detail: `客户端已启动但调试端口 ${port} 没响应（${timeoutMs / 1000}s 超时）` };
@@ -149,7 +163,7 @@ export async function runClientApp(pc, { logger, cfg, shotDir, shotName, dryRun 
 
   try {
     // 3) 选页面（必要时用客户端登录态新开一个网页）
-    const pages = browser.contexts().flatMap((c) => c.pages());
+    let pages = browser.contexts().flatMap((c) => c.pages());
     logger?.step(`发现 ${pages.length} 个页面`);
 
     if (pc.openUrl) {
@@ -159,8 +173,42 @@ export async function runClientApp(pc, { logger, cfg, shotDir, shotName, dryRun 
       await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => null);
       await sleep(2500);
     } else {
+      // 冷启动的客户端刚连上 CDP 时往往一个页面都还没有，
+      // 这时直接判"没找到可操作的页面"会误杀（实测刚拉起的 Trae 需要 5~15 秒才有窗口）
+      for (let i = 0; i < 20 && !pages.length; i++) {
+        await sleep(1500);
+        pages = browser.contexts().flatMap((c) => c.pages());
+        if (i === 3) logger?.step('还没出现页面，继续等待客户端渲染…');
+      }
       page = (pc.pageUrlMatch && pages.find((p) => p.url().includes(pc.pageUrlMatch))) || pages[0];
-      if (!page) return { status: 'error', detail: '没找到可操作的页面' };
+
+      // 连得上、但一个可操作窗口都没有：典型是"窗口被关掉、进程还挂在后台"，
+      // 这时 CDP 里只剩客户端自己的后台页（如 Trae 的 solo-lite），Playwright 认不出来。
+      // 重启一次客户端，工作区窗口才会重新建出来。
+      if (!page) {
+        logger?.warn(`${pc.name || '客户端'} 只有后台页、没有可操作窗口，重启一次再试`);
+        await browser.close().catch(() => null);
+        await gracefulQuitApp(pc, execPath, logger);
+        await sleep(1200);
+        version = await launchOnce();
+        if (!version) {
+          return { status: 'error', detail: `重启 ${pc.name || '客户端'} 后调试端口 ${port} 仍未就绪` };
+        }
+        browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`, { timeout: 20000 });
+        pages = browser.contexts().flatMap((c) => c.pages());
+        for (let i = 0; i < 20 && !pages.length; i++) {
+          await sleep(1500);
+          pages = browser.contexts().flatMap((c) => c.pages());
+        }
+        page = (pc.pageUrlMatch && pages.find((p) => p.url().includes(pc.pageUrlMatch))) || pages[0];
+      }
+
+      if (!page) {
+        return {
+          status: 'error',
+          detail: `没找到可操作的页面（重启客户端后仍只有 ${pages.length} 个后台窗口，请手动打开 ${pc.name || '客户端'} 窗口后重试）`,
+        };
+      }
     }
 
     // 3.4) 等界面真正渲染完（冷启动的 VS Code 系客户端常常还是空白）
@@ -206,7 +254,16 @@ export async function runClientApp(pc, { logger, cfg, shotDir, shotName, dryRun 
     // 4) 幂等：先看是不是今天已经签过
     let text = await pageText(page);
     const doneHit = (pc.doneKeywords || []).find((k) => text.includes(k));
-    if (doneHit) return { status: 'already', detail: `页面显示「${doneHit}」，今天已完成` };
+    if (doneHit) {
+      // 只凭文案判断会误判：页面上常有属于别的活动的同款文案（例如豆包工作的「已领取」
+      // 属于"选择工作领域领取奖励"，而每日签到其实还是「立即签到」）。
+      // 真正可信的信号是——签到入口按钮已经不在了。
+      const entryLeft = await findClickables(page, pc.keywords || ['签到']);
+      if (entryLeft.length === 0) {
+        return { status: 'already', detail: `页面显示「${doneHit}」且签到入口已消失，今天已完成` };
+      }
+      logger?.step(`页面出现了「${doneHit}」，但签到入口仍在，判定为今天还没签，继续`);
+    }
 
     // 4.5) 演练模式：只报告"能不能点到"，不执行任何调用
     if (dryRun) {
