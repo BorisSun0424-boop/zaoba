@@ -43,12 +43,16 @@ Playwright 持久化登录态 + launchd 定时，**装好后不用再管**。
 | 方式 | 适合谁 | 怎么做 |
 | --- | --- | --- |
 | **交给 AI Agent** | 不想碰终端 | 复制 [docs/AGENT-PROMPT.md](./docs/AGENT-PROMPT.md) 里的指令给你的 Agent，它负责装 Node ≥18、依赖、浏览器内核、定时任务 |
-| **一键脚本** | 有终端经验 | `bash scripts/bootstrap.sh`（先 `--check` 自检，加 `--with-service` 装定时任务） |
+| **一键脚本** | 有终端经验 | macOS：`bash scripts/bootstrap.sh`（先 `--check` 自检，加 `--with-service` 装定时任务）<br>Windows：`powershell -ExecutionPolicy Bypass -File scripts\bootstrap.ps1`（先 `-Check`，加 `-WithService`） |
 | **手动命令** | 想完全掌控 | 见 [docs/INSTALL.md](./docs/INSTALL.md) |
 
-前置条件：macOS 12+、**Node.js ≥ 18**、约 1.5GB 磁盘（依赖 + 570MB 浏览器内核）、macOS 已登录状态。
+> ⚠️ **Windows 用户请务必用 `.ps1` 脚本**（PowerShell），不要跑 `bash ... .sh`——那是 macOS 专用的，在 Windows 上会直接报「只支持 macOS」并退出。
+
+前置条件：macOS 12+ 或 Windows 10/11、**Node.js ≥ 18**、约 1.5GB 磁盘（依赖 + 570MB 浏览器内核；Windows 默认复用系统 Edge 可省掉这 570MB）。
 
 ## 一分钟上手
+
+### macOS
 
 ```bash
 git clone https://github.com/BorisSun0424-boop/zaoba.git
@@ -64,6 +68,24 @@ npm run dry-run                      # ④ 演练：只检查不签到
 npm run checkin                      # ⑤ 真跑一次
 bash scripts/install-launchd.sh      # ⑥ 装定时任务（每天 08:00 + 12:30 补跑）+ 常驻控制台
 npm run web                          # ⑦ 打开控制台 → http://127.0.0.1:7788
+```
+
+### Windows（PowerShell）
+
+```powershell
+git clone https://github.com/BorisSun0424-boop/zaoba.git
+cd zaoba
+
+# 国内直连 GitHub 不稳定时，用镜像（内容相同）：
+# git clone https://ghfast.top/https://github.com/BorisSun0424-boop/zaoba.git zaoba
+
+powershell -ExecutionPolicy Bypass -File scripts\bootstrap.ps1 -Check   # ① 自检
+powershell -ExecutionPolicy Bypass -File scripts\bootstrap.ps1          # ② 安装（复用系统 Edge，省 570MB）
+npm run login                                                          # ③ 登录智谱清言（WorkBuddy 用客户端扫码即可）
+npm run dry-run                                                        # ④ 演练：只检查不签到
+npm run checkin                                                        # ⑤ 真跑一次
+powershell -ExecutionPolicy Bypass -File scripts\install-service.ps1   # ⑥ 装定时任务（任务计划程序 ZaobaDailyCheckin）
+npm run web                                                            # ⑦ 打开控制台 → http://127.0.0.1:7788
 ```
 
 详细的权限、电源（睡眠/锁屏）、客户端要求、常见问题见 **[docs/INSTALL.md](./docs/INSTALL.md)**。

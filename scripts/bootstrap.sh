@@ -43,7 +43,25 @@ echo "模式: $([ "$CHECK_ONLY" = 1 ] && echo '仅检查' || echo '完整安装'
 step 1 "系统环境"
 OS_NAME="$(uname -s)"; ARCH="$(uname -m)"
 if [ "$OS_NAME" != "Darwin" ]; then
-  fail "当前只支持 macOS（检测到 ${OS_NAME}）"; exit 1
+  # 这个脚本是 macOS 专用。Windows 用户有对应的 PowerShell 版，别让他们卡在一个冰冷的退出码上。
+  IS_WINDOWS=0
+  case "$OS_NAME" in
+    MINGW*|MSYS*|CYGWIN*) IS_WINDOWS=1 ;;
+  esac
+  if [ "${OS:-}" = "Windows_NT" ]; then IS_WINDOWS=1; fi
+  if [ "$IS_WINDOWS" = "1" ]; then
+    echo ""
+    echo "  ⚠️  检测到 Windows。这个 .sh 脚本是 macOS 专用的，无法在 Windows 上运行。"
+    echo "  请改用 PowerShell 版本（在 PowerShell 里执行）："
+    echo ""
+    echo "      powershell -ExecutionPolicy Bypass -File scripts\\bootstrap.ps1 -Check   # 自检"
+    echo "      powershell -ExecutionPolicy Bypass -File scripts\\bootstrap.ps1          # 安装"
+    echo ""
+  else
+    echo ""
+    echo "  ✗ 当前只支持 macOS 或 Windows（检测到 ${OS_NAME}）。"
+  fi
+  exit 1
 fi
 ok "macOS / $ARCH"
 if [ "$ARCH" != "arm64" ]; then

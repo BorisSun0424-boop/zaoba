@@ -20,11 +20,11 @@
 
 | 项目 | 要求 | 说明 |
 | --- | --- | --- |
-| 系统 | macOS 12+ | Apple Silicon 最佳；Intel 可用但客户端类平台较慢 |
+| 系统 | macOS 12+ 或 Windows 10/11 | macOS 的 Apple Silicon 最佳；Intel 可用但客户端类平台较慢 |
 | 运行时 | **Node.js ≥ 18** | 核心依赖；用 `node -v` 检查 |
-| 磁盘 | ≥ 1.5GB | 依赖约 100MB + Chromium 内核约 570MB |
+| 磁盘 | ≥ 1.5GB | 依赖约 100MB + Chromium 内核约 570MB（Windows 默认复用系统 Edge 可省掉） |
 | 网络 | 可访问 nodejs.org / npm / 各平台站点 | 首次安装需要 |
-| 系统状态 | **已登录 macOS 桌面会话** | 定时任务属于用户会话，停在登录界面不会跑 |
+| 系统状态 | **已登录桌面会话** | 定时任务属于用户会话，停在登录界面不会跑 |
 | 权限 | 无需管理员密码（除安装 Node 的 pkg 方式） | 项目不放在受保护目录则不需要"完全磁盘访问权限" |
 
 ---
@@ -301,8 +301,8 @@ bash scripts/uninstall-launchd.sh
 
 ## 10. 已知限制
 
-1. 只覆盖 macOS；Windows/Linux 未适配
-2. 网页类平台依赖 Playwright 的无头浏览器（首次装 570MB）
+1. macOS 已完整验证；Windows 的一键脚本/网页类平台已适配，客户端类平台（WorkBuddy/豆包工作/Trae）代码已实现但**尚未真机验证**，Linux 未适配
+2. 网页类平台依赖 Playwright 的无头浏览器（首次装 570MB，Windows 复用 Edge 可省）
 3. 客户端类平台依赖客户端版本；客户端大版本更新后可能需要更新适配器
 4. 手机 App 内的签到（豆包个人版、腾讯元宝）无法覆盖
 5. 平台用户协议多数禁止自动化，账号风险自负，请低频自用
