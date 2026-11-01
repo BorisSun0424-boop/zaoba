@@ -237,7 +237,19 @@ export async function runClientApp(pc, { logger, cfg, shotDir, shotName, dryRun 
             const loc = page.locator(sel).first();
             if (await loc.isVisible({ timeout: 2000 })) {
               logger?.step(`打开前置菜单: ${sel}`);
-              await loc.click({ timeout: 4000 });
+              try {
+                await loc.click({ timeout: 4000 });
+              } catch (clickErr) {
+                // locator.click 会做可点击性检查（visible/stable/receives events），
+                // 被透明悬浮层挡住的按钮会因此超时失败（实测 Trae CN 改版后的账号按钮）。
+                // 退化为坐标点击（page.mouse 不做遮挡检查），能穿透遮挡层点到目标。
+                const box = await loc.boundingBox();
+                if (!box) throw clickErr;
+                const x = Math.round(box.x + box.width / 2);
+                const y = Math.round(box.y + box.height / 2);
+                logger?.step(`点击被遮挡，改用坐标点击 (${x},${y})`);
+                await page.mouse.click(x, y);
+              }
               await sleep(1800);
               clickedMenu = true;
               break;
